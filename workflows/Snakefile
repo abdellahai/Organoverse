@@ -1,0 +1,83 @@
+# Snakefile – Organoverse Workflow
+
+configfile: "config/config.yaml"
+
+rule all:
+    input:
+        "results/report/final_report.pdf"
+
+rule quality_control:
+    input:
+        r1=config["input_reads"]["R1"],
+        r2=config["input_reads"]["R2"]
+    output:
+        "results/cleaned_reads/R1_trimmed.fq.gz",
+        "results/cleaned_reads/R2_trimmed.fq.gz"
+    shell:
+        """
+        fastp -i {input.r1} -I {input.r2} \
+              -o {output[0]} -O {output[1]} \
+              --html results/qc_reports/fastp.html
+        """
+
+rule ai_filtering:
+    input:
+        r1="results/cleaned_reads/R1_trimmed.fq.gz",
+        r2="results/cleaned_reads/R2_trimmed.fq.gz"
+    output:
+        "results/verified_reads/R1.fq",
+        "results/verified_reads/R2.fq"
+    params:
+        model=config["ml_model"]
+    shell:
+        "python scripts/ai_filtering.py {input.r1} {input.r2} {output[0]} {output[1]} {params.model}"
+
+rule assemble:
+    input:
+        r1="results/verified_reads/R1.fq",
+        r2="results/verified_reads/R2.fq"
+    output:
+        "results/assembly/contigs.fasta"
+    shell:
+        """
+        spades.py -1 {input.r1} -2 {input.r2} -o results/assembly \
+                  --{config[spades_mode]}
+        cp results/assembly/contigs.fasta {output}
+        """
+
+rule circularize:
+    input:
+        "results/assembly/contigs.fasta"
+    output:
+        "results/circularized/organelle_circular.fasta"
+    shell:
+        "python scripts/circularize.py {input} {output}"
+
+rule annotate:
+    input:
+        fasta="results/circularized/organelle_circular.fasta"
+    output:
+        "results/annotation/organelle.gbk"
+    shell:
+        """
+        prokka --outdir results/annotation \
+               --prefix organelle \
+               --kingdom Bacteria \
+               --genus {config[species].split()[0]} \
+               --species "{config[species]}" \
+               --gcode {config[translation_table]} \
+               {input.fasta}
+        """
+
+rule report:
+    input:
+        fasta="results/circularized/organelle_circular.fasta",
+        annotation="results/annotation/organelle.gbk"
+    output:
+        html="results/report/final_report.html",
+        pdf="results/report/final_report.pdf"
+    shell:
+        """
+        python scripts/generate_report.py {input.fasta} {input.annotation} {output.html}
+        python scripts/generate_pdf_report.py {output.html} {output.pdf}
+        """

@@ -1,0 +1,31 @@
+# === Organoverse Configuration File ===
+
+species: "Arabidopsis thaliana"
+organism_type: "chloroplast"    # Options: "chloroplast" or "mitochondria"
+taxonomy_id: 3702               # NCBI Taxonomy ID for Arabidopsis
+reference_source: "ncbi"
+
+# Input read files (paired-end)
+input_reads:
+  R1: "data/sample1_R1.fastq.gz"
+  R2: "data/sample1_R2.fastq.gz"
+
+# Assembly options
+spades_mode: "careful"          # Options: "default", "careful", "meta"
+
+# Annotation options
+translation_table: 11           # Bacterial/plant mitochondria code
+genetic_code: "standard"        # or "plant_mt", "cp", "yeast_mt", etc.
+blast_database: "ncbi_taxa"
+
+# ML model path
+ml_model: "models/rf_organelle_classifier.joblib"
+
+# Output configuration
+output_dir: "results/"
+threads: 8
+memory: "16G"
+
+# Reporting
+generate_pdf: true
+generate_html: true

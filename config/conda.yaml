@@ -1,0 +1,36 @@
+name: organoverse
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python=3.10
+  - snakemake
+  - nextflow
+  - fastp
+  - fastqc
+  - multiqc
+  - jellyfish
+  - bbmap
+  - vsearch
+  - seqkit
+  - kraken2
+  - seqtk
+  - sra-tools
+  - biopython
+  - pandas
+  - matplotlib
+  - seaborn
+  - prokka
+  - cd-hit
+  - mafft
+  - iqtree
+  - blast
+  - joblib
+  - scikit-learn
+  - jinja2
+  - transformers
+  - pytorch
+  - pip
+  - pip:
+    - pdfkit

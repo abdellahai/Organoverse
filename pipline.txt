@@ -1,0 +1,19 @@
+#alignment
+bowtie2 -x NC_063518.1.fasta -1 ../SRR24502586_1.fastq -2 ../SRR24502586_2.fastq -p 64  > NC_063518_aligned.sam
+#view
+samtools view -@ 64 -bS NC_063518_aligned.sam -o NC_063518_aligned.bam
+#sort
+samtools sort -@ 64 -o NC_063518_sorted_aligned.bam *aligned.bam
+#extract
+samtools fastq -1 extracted_reads_1.fq -2 extracted_reads_2.fq -@ 64 NC_063518_sorted_aligned.bam
+#dedup
+seqkit rmdup -s -o dedup_1.fq cleaned_1.fq
+seqkit rmdup -s -o dedup_2.fq cleaned_2.fq
+#pairing
+seqkit pair -1 dedup_1.fq -2 dedup_2.fq
+#pairing
+seqkit pair -1 dedup_1.fq -2 dedup_2.fq
+#quality assessment
+fastp -i dedup_1.fq -I dedup_2.fq -o cleaned_1.fq -O cleaned_2.fq --html report.html --json report.json --thread 64 --detect_adapter_for_pe --qualified_quality_phred 30 --length_required 150
+#assembly 
+spades.py -1 cleaned_1.fq -2 cleaned_2.fq --only-assembler --careful -m 150 -t 76 -o spades_assm

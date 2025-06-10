@@ -54,6 +54,14 @@ snakemake --cores 4
 nextflow run workflows/main.nf
 ```
 Configure species and paths in config/config.yaml.
+
+### 3. Direct CLI
+An all-in-one script is provided for smaller jobs and testing:
+```bash
+python scripts/organoverse.py --species "Arabidopsis thaliana" \
+    --organelle chloroplast --library paired \
+    --reads R1.fq.gz R2.fq.gz --outdir results
+```
 ## 🧪 Test Datasets
 Sample mitochondrial and chloroplast genomes from:
 

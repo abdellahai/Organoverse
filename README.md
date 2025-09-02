@@ -1,7 +1,7 @@
 # Organoverse: AI-Assisted Plant Organellar Genome Assembly Workbench
 
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-/images/License.jpg)](LICENSE)
+
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
 
 Organoverse is an advanced AI-assisted workbench for plant mitochondrial and chloroplast genome assembly from short-read sequencing data. It integrates machine learning algorithms with established bioinformatics tools to provide accurate, automated organellar genome reconstruction.

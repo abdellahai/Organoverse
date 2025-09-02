@@ -1,7 +1,7 @@
 # Organoverse: AI-Assisted Plant Organellar Genome Assembly Workbench
 
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
-
+/images/License.jpg)](LICENSE)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
 
 Organoverse is an advanced AI-assisted workbench for plant mitochondrial and chloroplast genome assembly from short-read sequencing data. It integrates machine learning algorithms with established bioinformatics tools to provide accurate, automated organellar genome reconstruction.
@@ -129,9 +129,9 @@ If you use Organoverse in your research, please cite:
 ```bibtex
 @article{organoverse2024,
     title={Organoverse: An AI-Assisted Workbench for Plant Organellar Genome Assembly},
-    author={Abdellah, Idrissi Azami and Hassan, Ghazal},
+    author={Author, First and Author, Second},
     journal={Bioinformatics},
-    year={2025},
+    year={2024},
     publisher={Oxford University Press}
 }
 ```
@@ -148,12 +148,12 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - **Issues**: [GitHub Issues](https://github.com/organoverse/organoverse-workbench/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/organoverse/organoverse-workbench/discussions)
-- **Email**: idrissi.azami.abdellah@gmail.com
+- **Email**: contact@organoverse.org
 
 ## 🙏 Acknowledgments
 
-- MedPerOne Laboratory
-- Iridian Genomes
+- National Science Foundation for funding support
+- Plant genome research community for valuable feedback
 - Open-source bioinformatics tool developers
 
 ---

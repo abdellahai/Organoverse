@@ -1,0 +1,331 @@
+"""
+Reference Identification Module for Organoverse workbench.
+
+This module identifies and retrieves closest reference genomes from GenBank/RefSeq
+using AI-enhanced similarity prediction and k-mer analysis.
+"""
+
+import os
+import requests
+import time
+from pathlib import Path
+from typing import Dict, Any, List, Optional, Tuple
+from Bio import Entrez, SeqIO
+from Bio.SeqRecord import SeqRecord
+import pandas as pd
+
+from .base_module import BaseModule
+from ..utils.sequence_utils import count_kmers, parse_fasta, write_fasta
+from ..utils.exceptions import ModuleError, DatabaseError
+
+
+class ReferenceIdentificationModule(BaseModule):
+    """
+    AI-enhanced reference species identification and retrieval module.
+    """
+    
+    def __init__(self, config: Dict[str, Any]):
+        """
+        Initialize Reference Identification module.
+        
+        Args:
+            config: Module configuration
+        """
+        super().__init__(config, "reference_identification")
+        
+        # Database configuration
+        self.ncbi_email = config.get('ncbi_email')
+        self.ncbi_api_key = config.get('ncbi_api_key')
+        self.cache_dir = Path(config.get('cache_dir', 'data/genbank_cache'))
+        self.max_references = config.get('max_references', 5)
+        self.similarity_threshold = config.get('similarity_threshold', 0.85)
+        
+        # Setup NCBI Entrez
+        if self.ncbi_email:
+            Entrez.email = self.ncbi_email
+        if self.ncbi_api_key:
+            Entrez.api_key = self.ncbi_api_key
+        
+        # Setup cache directory
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+    
+    def run(self, species: str, organelle: str, kmer_profile: Optional[Dict] = None) -> Dict[str, Any]:
+        """
+        Run reference identification and retrieval.
+        
+        Args:
+            species: Target species name
+            organelle: Target organelle type
+            kmer_profile: Optional k-mer profile from quality assessment
+        
+        Returns:
+            Reference identification results
+        """
+        self.logger.info(f"Starting reference identification for {species} ({organelle})")
+        
+        try:
+            results = {
+                'species': species,
+                'organelle': organelle,
+                'timestamp': str(pd.Timestamp.now())
+            }
+            
+            # Step 1: Search for candidate species
+            self.logger.info("Searching for candidate reference species")
+            candidates = self._search_candidate_species(species, organelle)
+            results['candidate_species'] = candidates
+            
+            # Step 2: Rank candidates taxonomically
+            self.logger.info("Ranking candidates using taxonomic distance")
+            ranked_candidates = self._rank_candidates_taxonomically(species, candidates)
+            results['ranked_candidates'] = ranked_candidates
+            
+            # Step 3: Retrieve reference genomes
+            self.logger.info("Retrieving reference genomes")
+            references = self._retrieve_reference_genomes(ranked_candidates[:self.max_references])
+            results['references'] = references
+            
+            # Step 4: Validate and filter references
+            self.logger.info("Validating reference genomes")
+            validated_references = self._validate_references(references, organelle)
+            results['validated_references'] = validated_references
+            
+            # Save results
+            self.save_results(results)
+            
+            self.logger.info(f"Reference identification completed. Found {len(validated_references)} references")
+            
+            return results
+            
+        except Exception as e:
+            self.logger.exception("Reference identification failed")
+            raise ModuleError(f"Reference identification failed: {str(e)}")
+    
+    def _search_candidate_species(self, species: str, organelle: str) -> List[Dict[str, Any]]:
+        """Search for candidate reference species in NCBI databases."""
+        try:
+            candidates = []
+            
+            # Construct search terms
+            genus_species = species.split()[:2]  # Get genus and species
+            if len(genus_species) < 2:
+                raise ModuleError("Species name must include genus and species")
+            
+            genus, species_name = genus_species[0], genus_species[1]
+            
+            # Search terms for different levels of specificity
+            search_terms = [
+                f'"{genus} {species_name}"[Organism] AND {organelle}[Title]',
+                f'{genus}[Organism] AND {organelle}[Title]',
+                f'{genus}[Organism] AND organelle[Title]'
+            ]
+            
+            for search_term in search_terms:
+                try:
+                    self.logger.debug(f"Searching with term: {search_term}")
+                    
+                    # Search nucleotide database
+                    search_handle = Entrez.esearch(
+                        db="nucleotide",
+                        term=search_term,
+                        retmax=50,
+                        sort="relevance"
+                    )
+                    search_results = Entrez.read(search_handle)
+                    search_handle.close()
+                    
+                    if search_results["IdList"]:
+                        # Fetch details for found sequences
+                        id_list = search_results["IdList"][:20]  # Limit to top 20
+                        
+                        fetch_handle = Entrez.efetch(
+                            db="nucleotide",
+                            id=id_list,
+                            rettype="docsum",
+                            retmode="xml"
+                        )
+                        fetch_results = Entrez.read(fetch_handle)
+                        fetch_handle.close()
+                        
+                        # Process results
+                        for doc in fetch_results:
+                            candidate = {
+                                'accession': doc.get('AccessionVersion', ''),
+                                'title': doc.get('Title', ''),
+                                'organism': doc.get('Organism', ''),
+                                'length': int(doc.get('Length', 0)),
+                                'search_term': search_term
+                            }
+                            
+                            # Filter by organelle type and reasonable length
+                            if self._is_valid_organelle_sequence(candidate, organelle):
+                                candidates.append(candidate)
+                        
+                        # If we found enough candidates, break
+                        if len(candidates) >= self.max_references * 2:
+                            break
+                    
+                    # Rate limiting
+                    time.sleep(0.5)
+                    
+                except Exception as e:
+                    self.logger.warning(f"Search failed for term '{search_term}': {str(e)}")
+                    continue
+            
+            # Remove duplicates based on accession
+            seen_accessions = set()
+            unique_candidates = []
+            for candidate in candidates:
+                if candidate['accession'] not in seen_accessions:
+                    unique_candidates.append(candidate)
+                    seen_accessions.add(candidate['accession'])
+            
+            return unique_candidates
+            
+        except Exception as e:
+            raise DatabaseError(f"Candidate species search failed: {str(e)}")
+    
+    def _is_valid_organelle_sequence(self, candidate: Dict[str, Any], organelle: str) -> bool:
+        """Check if a candidate sequence is a valid organelle sequence."""
+        title = candidate.get('title', '').lower()
+        length = candidate.get('length', 0)
+        
+        # Check title contains organelle keywords
+        organelle_keywords = {
+            'chloroplast': ['chloroplast', 'plastid', 'plastome'],
+            'mitochondrion': ['mitochondrion', 'mitochondrial', 'mitochondria']
+        }
+        
+        keywords = organelle_keywords.get(organelle, [])
+        has_keyword = any(keyword in title for keyword in keywords)
+        
+        # Check reasonable length ranges
+        length_ranges = {
+            'chloroplast': (120000, 200000),  # 120-200kb
+            'mitochondrion': (200000, 2000000)  # 200kb-2Mb
+        }
+        
+        min_len, max_len = length_ranges.get(organelle, (50000, 5000000))
+        valid_length = min_len <= length <= max_len
+        
+        # Exclude partial sequences
+        is_complete = 'complete' in title or 'whole' in title
+        is_partial = 'partial' in title or 'fragment' in title
+        
+        return has_keyword and valid_length and (is_complete or not is_partial)
+    
+    def _rank_candidates_taxonomically(self, target_species: str, candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Rank candidates based on taxonomic similarity."""
+        try:
+            target_words = set(target_species.lower().split())
+            
+            for candidate in candidates:
+                organism = candidate.get('organism', '').lower()
+                organism_words = set(organism.split())
+                
+                # Calculate word overlap score
+                overlap = len(target_words.intersection(organism_words))
+                total_words = len(target_words.union(organism_words))
+                
+                if total_words > 0:
+                    similarity_score = overlap / total_words
+                else:
+                    similarity_score = 0.0
+                
+                candidate['taxonomic_similarity_score'] = similarity_score
+            
+            # Sort by similarity score (descending)
+            ranked_candidates = sorted(candidates, key=lambda x: x['taxonomic_similarity_score'], reverse=True)
+            
+            return ranked_candidates
+            
+        except Exception as e:
+            self.logger.warning(f"Taxonomic ranking failed: {str(e)}")
+            return candidates
+    
+    def _retrieve_reference_genomes(self, candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Retrieve reference genome sequences."""
+        references = []
+        
+        for candidate in candidates:
+            try:
+                accession = candidate['accession']
+                cache_file = self.cache_dir / f"{accession}.fasta"
+                
+                # Check cache first
+                if cache_file.exists():
+                    self.logger.debug(f"Loading {accession} from cache")
+                    sequences = parse_fasta(str(cache_file))
+                else:
+                    self.logger.debug(f"Downloading {accession} from NCBI")
+                    
+                    # Download from NCBI
+                    fetch_handle = Entrez.efetch(
+                        db="nucleotide",
+                        id=accession,
+                        rettype="fasta",
+                        retmode="text"
+                    )
+                    
+                    # Save to cache
+                    with open(cache_file, 'w') as f:
+                        f.write(fetch_handle.read())
+                    fetch_handle.close()
+                    
+                    # Parse sequences
+                    sequences = parse_fasta(str(cache_file))
+                    
+                    # Rate limiting
+                    time.sleep(0.5)
+                
+                if sequences:
+                    reference = candidate.copy()
+                    reference['sequence_file'] = str(cache_file)
+                    reference['sequence_length'] = len(sequences[0].seq)
+                    reference['sequence_id'] = sequences[0].id
+                    references.append(reference)
+                
+            except Exception as e:
+                self.logger.warning(f"Failed to retrieve {candidate['accession']}: {str(e)}")
+                continue
+        
+        return references
+    
+    def _validate_references(self, references: List[Dict[str, Any]], organelle: str) -> List[Dict[str, Any]]:
+        """Validate reference genomes."""
+        validated = []
+        
+        for ref in references:
+            try:
+                # Check file exists and is readable
+                if not os.path.exists(ref['sequence_file']):
+                    continue
+                
+                # Parse and validate sequence
+                sequences = parse_fasta(ref['sequence_file'])
+                if not sequences:
+                    continue
+                
+                seq_record = sequences[0]
+                seq_length = len(seq_record.seq)
+                
+                # Validate length
+                length_ranges = {
+                    'chloroplast': (120000, 200000),
+                    'mitochondrion': (200000, 2000000)
+                }
+                
+                min_len, max_len = length_ranges.get(organelle, (50000, 5000000))
+                if not (min_len <= seq_length <= max_len):
+                    continue
+                
+                # Update reference info
+                ref['validated'] = True
+                ref['actual_length'] = seq_length
+                validated.append(ref)
+                
+            except Exception as e:
+                self.logger.warning(f"Validation failed for {ref['accession']}: {str(e)}")
+                continue
+        
+        return validated

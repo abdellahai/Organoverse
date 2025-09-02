@@ -129,9 +129,9 @@ If you use Organoverse in your research, please cite:
 ```bibtex
 @article{organoverse2024,
     title={Organoverse: An AI-Assisted Workbench for Plant Organellar Genome Assembly},
-    author={Author, First and Author, Second},
+    author={Abdellah, Idrissi Azami and Hassan, Ghazal},
     journal={Bioinformatics},
-    year={2024},
+    year={2025},
     publisher={Oxford University Press}
 }
 ```
@@ -148,13 +148,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - **Issues**: [GitHub Issues](https://github.com/organoverse/organoverse-workbench/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/organoverse/organoverse-workbench/discussions)
-- **Email**: contact@organoverse.org
-
-## 🙏 Acknowledgments
-
-- National Science Foundation for funding support
-- Plant genome research community for valuable feedback
-- Open-source bioinformatics tool developers
+- **Email**: idrissi.azami.abdellah@gmail.com
 
 ---
 

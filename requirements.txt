@@ -17,12 +17,7 @@ dgl>=1.1.0
 
 # Bioinformatics tools integration
 pysam>=0.21.0
-khmer>=3.0.0
 screed>=1.1.2
-
-# Sequence analysis
-jellyfish>=0.11.0
-kmc>=3.2.1
 
 # Data processing and visualization
 matplotlib>=3.5.0
@@ -45,15 +40,6 @@ entrez-direct>=16.2
 # Parallel processing
 joblib>=1.1.0
 multiprocessing-logging>=0.3.4
-
-# Quality control
-fastqc>=0.11.9
-trimmomatic>=0.39
-
-# Assembly tools (external dependencies - install separately)
-# spades>=3.15.0
-# novoplasty>=4.3.1
-# getorganelle>=1.7.7
 
 # Development and testing
 pytest>=7.0.0

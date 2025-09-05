@@ -1,7 +1,7 @@
 """
 Reference Identification Module for Organoverse workbench.
 
-This module identifies and retrieves closest reference genomes from GenBank/RefSeq
+This module identifies and retrieves closest reference genomes from RefSeq
 using AI-enhanced similarity prediction and k-mer analysis.
 """
 
@@ -70,8 +70,8 @@ class ReferenceIdentificationModule(BaseModule):
                 'timestamp': str(pd.Timestamp.now())
             }
             
-            # Step 1: Search for candidate species
-            self.logger.info("Searching for candidate reference species")
+            # Step 1: Search for candidate species (iterative taxonomy lookup)
+            self.logger.info("Searching for candidate reference species from RefSeq")
             candidates = self._search_candidate_species(species, organelle)
             results['candidate_species'] = candidates
             
@@ -102,85 +102,83 @@ class ReferenceIdentificationModule(BaseModule):
             raise ModuleError(f"Reference identification failed: {str(e)}")
     
     def _search_candidate_species(self, species: str, organelle: str) -> List[Dict[str, Any]]:
-        """Search for candidate reference species in NCBI databases."""
+        """Search for candidate reference species in RefSeq databases using iterative taxonomy."""
         try:
-            candidates = []
-            
-            # Construct search terms
+            # Split to extract genus and species names
             genus_species = species.split()[:2]  # Get genus and species
             if len(genus_species) < 2:
                 raise ModuleError("Species name must include genus and species")
             
             genus, species_name = genus_species[0], genus_species[1]
             
-            # Search terms for different levels of specificity
+            # Construct iterative search terms with RefSeq filter added
             search_terms = [
-                f'"{genus} {species_name}"[Organism] AND {organelle}[Title]',
-                f'{genus}[Organism] AND {organelle}[Title]',
-                f'{genus}[Organism] AND organelle[Title]'
+                # Current taxon: full species match
+                f'"{genus} {species_name}"[Organism] AND {organelle}[Title] AND srcdb_refseq[PROP]',
+                # Upper taxa: genus level with organelle filter
+                f'{genus}[Organism] AND {organelle}[Title] AND srcdb_refseq[PROP]',
+                # Fallback: broader organelle search among RefSeq entries
+                f'{genus}[Organism] AND organelle[Title] AND srcdb_refseq[PROP]'
             ]
             
-            for search_term in search_terms:
-                try:
-                    self.logger.debug(f"Searching with term: {search_term}")
-                    
-                    # Search nucleotide database
-                    search_handle = Entrez.esearch(
+            for idx, search_term in enumerate(search_terms):
+                self.logger.debug(f"Searching with term: {search_term}")
+                candidates = []
+                
+                # Search nucleotide database
+                search_handle = Entrez.esearch(
+                    db="nucleotide",
+                    term=search_term,
+                    retmax=50,
+                    sort="relevance"
+                )
+                search_results = Entrez.read(search_handle)
+                search_handle.close()
+                
+                if search_results["IdList"]:
+                    # Fetch details for found sequences
+                    id_list = search_results["IdList"][:20]  # Limit to top 20
+                    fetch_handle = Entrez.efetch(
                         db="nucleotide",
-                        term=search_term,
-                        retmax=50,
-                        sort="relevance"
+                        id=id_list,
+                        rettype="docsum",
+                        retmode="xml"
                     )
-                    search_results = Entrez.read(search_handle)
-                    search_handle.close()
+                    fetch_results = Entrez.read(fetch_handle)
+                    fetch_handle.close()
                     
-                    if search_results["IdList"]:
-                        # Fetch details for found sequences
-                        id_list = search_results["IdList"][:20]  # Limit to top 20
+                    # Process results
+                    for doc in fetch_results:
+                        candidate = {
+                            'accession': doc.get('AccessionVersion', ''),
+                            'title': doc.get('Title', ''),
+                            'organism': doc.get('Organism', ''),
+                            'length': int(doc.get('Length', 0)),
+                            'search_term': search_term
+                        }
                         
-                        fetch_handle = Entrez.efetch(
-                            db="nucleotide",
-                            id=id_list,
-                            rettype="docsum",
-                            retmode="xml"
-                        )
-                        fetch_results = Entrez.read(fetch_handle)
-                        fetch_handle.close()
-                        
-                        # Process results
-                        for doc in fetch_results:
-                            candidate = {
-                                'accession': doc.get('AccessionVersion', ''),
-                                'title': doc.get('Title', ''),
-                                'organism': doc.get('Organism', ''),
-                                'length': int(doc.get('Length', 0)),
-                                'search_term': search_term
-                            }
-                            
-                            # Filter by organelle type and reasonable length
-                            if self._is_valid_organelle_sequence(candidate, organelle):
-                                candidates.append(candidate)
-                        
-                        # If we found enough candidates, break
-                        if len(candidates) >= self.max_references * 2:
-                            break
+                        # Filter by organelle type and reasonable length
+                        if self._is_valid_organelle_sequence(candidate, organelle):
+                            candidates.append(candidate)
                     
-                    # Rate limiting
-                    time.sleep(0.5)
+                    # Remove duplicates based on accession
+                    seen_accessions = set()
+                    unique_candidates = []
+                    for candidate in candidates:
+                        if candidate['accession'] not in seen_accessions:
+                            unique_candidates.append(candidate)
+                            seen_accessions.add(candidate['accession'])
                     
-                except Exception as e:
-                    self.logger.warning(f"Search failed for term '{search_term}': {str(e)}")
-                    continue
+                    # If candidates are found at the current taxonomic level, return immediately
+                    if unique_candidates:
+                        self.logger.debug(f"Found {len(unique_candidates)} candidates using term: {search_term}")
+                        return unique_candidates
+                
+                # Rate limiting between search term iterations
+                time.sleep(0.5)
             
-            # Remove duplicates based on accession
-            seen_accessions = set()
-            unique_candidates = []
-            for candidate in candidates:
-                if candidate['accession'] not in seen_accessions:
-                    unique_candidates.append(candidate)
-                    seen_accessions.add(candidate['accession'])
-            
-            return unique_candidates
+            # If no candidates found using any iterative strategy, return empty list
+            return []
             
         except Exception as e:
             raise DatabaseError(f"Candidate species search failed: {str(e)}")

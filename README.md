@@ -38,6 +38,8 @@ pip install -e .
 # SPAdes, NOVOPlasty, GetOrganelle, etc.
 ```
 
+See [Installation Guide](docs/installation.md) for more details.
+
 ### Basic Usage
 
 ```bash
@@ -104,10 +106,8 @@ Organoverse implements state-of-the-art algorithms based on peer-reviewed resear
 ## 📖 Documentation
 
 - [Installation Guide](docs/installation.md)
-- [User Manual](docs/user_manual.md)
-- [API Reference](docs/api_reference.md)
 - [Algorithm Details](docs/algorithms.md)
-- [Troubleshooting](docs/troubleshooting.md)
+- [Application Note](docs/application_note.md)
 
 ## 🧪 Testing
 

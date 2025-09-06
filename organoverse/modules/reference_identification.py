@@ -110,16 +110,30 @@ class ReferenceIdentificationModule(BaseModule):
                 raise ModuleError("Species name must include genus and species")
             
             genus, species_name = genus_species[0], genus_species[1]
-            
+
+            # Retrieve taxonomic lineage for iterative searching
+            lineage = self._get_taxonomic_lineage(species)
+
             # Construct iterative search terms with RefSeq filter added
             search_terms = [
                 # Current taxon: full species match
                 f'"{genus} {species_name}"[Organism] AND {organelle}[Title] AND srcdb_refseq[PROP]',
-                # Upper taxa: genus level with organelle filter
+                # Upper taxa: genus level
                 f'{genus}[Organism] AND {organelle}[Title] AND srcdb_refseq[PROP]',
-                # Fallback: broader organelle search among RefSeq entries
-                f'{genus}[Organism] AND organelle[Title] AND srcdb_refseq[PROP]'
             ]
+
+            # Add progressively broader taxa
+            for rank in ["family", "order", "class", "phylum"]:
+                name = next((n for r, n in lineage if r == rank), None)
+                if name:
+                    search_terms.append(
+                        f'{name}[Organism] AND {organelle}[Title] AND srcdb_refseq[PROP]'
+                    )
+
+            # Fallback: broader organelle search among RefSeq entries
+            search_terms.append(
+                f'{genus}[Organism] AND organelle[Title] AND srcdb_refseq[PROP]'
+            )
             
             for idx, search_term in enumerate(search_terms):
                 self.logger.debug(f"Searching with term: {search_term}")
@@ -182,6 +196,27 @@ class ReferenceIdentificationModule(BaseModule):
             
         except Exception as e:
             raise DatabaseError(f"Candidate species search failed: {str(e)}")
+
+    def _get_taxonomic_lineage(self, species: str) -> List[Tuple[str, str]]:
+        """Retrieve taxonomic lineage for a species from NCBI."""
+        try:
+            handle = Entrez.esearch(db="taxonomy", term=species, retmode="xml")
+            record = Entrez.read(handle)
+            handle.close()
+            if not record["IdList"]:
+                return []
+            tax_id = record["IdList"][0]
+            fetch_handle = Entrez.efetch(db="taxonomy", id=tax_id, retmode="xml")
+            data = Entrez.read(fetch_handle)[0]
+            fetch_handle.close()
+            lineage = []
+            for tax in data.get("LineageEx", []):
+                lineage.append((tax.get("Rank", ""), tax.get("ScientificName", "")))
+            lineage.append((data.get("Rank", ""), data.get("ScientificName", "")))
+            return lineage
+        except Exception as e:
+            self.logger.debug(f"Taxonomy lookup failed for {species}: {e}")
+            return []
     
     def _is_valid_organelle_sequence(self, candidate: Dict[str, Any], organelle: str) -> bool:
         """Check if a candidate sequence is a valid organelle sequence."""
@@ -220,26 +255,59 @@ class ReferenceIdentificationModule(BaseModule):
             for candidate in candidates:
                 organism = candidate.get('organism', '').lower()
                 organism_words = set(organism.split())
-                
+
                 # Calculate word overlap score
                 overlap = len(target_words.intersection(organism_words))
                 total_words = len(target_words.union(organism_words))
-                
+
                 if total_words > 0:
                     similarity_score = overlap / total_words
                 else:
                     similarity_score = 0.0
-                
+
                 candidate['taxonomic_similarity_score'] = similarity_score
-            
-            # Sort by similarity score (descending)
-            ranked_candidates = sorted(candidates, key=lambda x: x['taxonomic_similarity_score'], reverse=True)
-            
+
+            # Add literature-based scores when multiple candidates are present
+            if len(candidates) > 1:
+                candidates = self._score_references_literature(target_species, candidates)
+
+            # Sort by combined score
+            ranked_candidates = sorted(
+                candidates,
+                key=lambda x: (
+                    x.get('taxonomic_similarity_score', 0),
+                    x.get('literature_score', 0),
+                ),
+                reverse=True,
+            )
+
             return ranked_candidates
-            
+
         except Exception as e:
             self.logger.warning(f"Taxonomic ranking failed: {str(e)}")
             return candidates
+
+    def _score_references_literature(self, target_species: str, candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Score candidate references based on literature co-occurrence."""
+        for cand in candidates:
+            organism = cand.get('organism', '')
+            try:
+                query = f'"{target_species}"[Title/Abstract] AND "{organism}"[Title/Abstract]'
+                handle = Entrez.esearch(db="pubmed", term=query, retmax=0)
+                record = Entrez.read(handle)
+                handle.close()
+                count = int(record.get("Count", 0))
+            except Exception as e:
+                self.logger.debug(f"Literature search failed for {organism}: {e}")
+                count = 0
+            cand['literature_score'] = count
+
+        max_count = max((c['literature_score'] for c in candidates), default=0)
+        if max_count > 0:
+            for c in candidates:
+                c['literature_score'] /= max_count
+
+        return candidates
     
     def _retrieve_reference_genomes(self, candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Retrieve reference genome sequences."""
